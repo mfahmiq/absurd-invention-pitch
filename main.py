@@ -12,6 +12,16 @@ guests in a tiny embarrassed voice, so its owner never has to spell out
 ritual of reciting a Wi-Fi password character by character to every guest;
 the fix is absurd (a shy, whispering router) yet weirdly plausible (the
 router already knows the password, so why shouldn't it just tell them?).
+
+Design: the entry is validated twice, by two separate steps. First,
+``validate`` checks the pitch string in memory against the competition
+gate (UTF-8 text, 1-220 characters, not only whitespace, exactly one
+sentence ending in a single period, no newlines). Then ``write_entry``
+writes it to ``entry.txt`` and reads the file back from disk, verifying
+that what landed on disk is byte-identical to the pitch and still passes
+the same gate — so the submitted file is exactly what was checked, never
+a stale or half-written copy. The output is deterministic: the pitch is a
+fixed string, so every run produces the same bytes.
 """
 
 import os
@@ -27,9 +37,13 @@ PITCH = (
 )
 
 
-def self_check(text: str) -> None:
+def validate(text: str) -> None:
     """Verify the entry against the gate: UTF-8 text, 1-220 chars, not only
-    whitespace, exactly one sentence."""
+    whitespace, exactly one sentence.
+
+    Called twice: once on the pitch string in memory, and once on the text
+    read back from the written file, so a write error cannot slip through.
+    """
     if not text or not text.strip():
         raise SystemExit("entry is empty or only whitespace")
     encoded = text.encode("utf-8")  # raises if not valid UTF-8 text
@@ -42,24 +56,35 @@ def self_check(text: str) -> None:
         raise SystemExit("entry must be exactly one sentence ending in '.'")
     if "\n" in text or "\r" in text:
         raise SystemExit("entry must be a single line")
-    print(f"self-check OK: {len(text)} chars, {len(encoded)} bytes, "
+    print(f"validate OK: {len(text)} chars, {len(encoded)} bytes, "
           f"1 sentence")
 
 
-def main() -> None:
-    self_check(PITCH)
-    out_dir = os.environ.get("MAKEFUN_OUTPUT_DIR", "./out")
+def write_entry(text: str, out_dir: str) -> str:
+    """Write the pitch to ``entry.txt`` in ``out_dir`` and verify the file
+    on disk, byte for byte, before returning its path.
+
+    The read-back check is the point: it proves the bytes the gate will
+    read are the bytes we validated, not just the string we intended.
+    """
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, "entry.txt")
     with open(path, "w", encoding="utf-8", newline="") as f:
-        f.write(PITCH)
+        f.write(text)
     # Verify what was actually written, not just what we intended.
     with open(path, "r", encoding="utf-8") as f:
         written = f.read()
-    if written != PITCH:
+    if written != text:
         raise SystemExit("written entry differs from the pitch")
-    self_check(written)
+    validate(written)
     print(f"wrote {path}")
+    return path
+
+
+def main() -> None:
+    validate(PITCH)
+    out_dir = os.environ.get("MAKEFUN_OUTPUT_DIR", "./out")
+    write_entry(PITCH, out_dir)
 
 
 if __name__ == "__main__":
